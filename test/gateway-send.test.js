@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
 
-import { GATEWAY_MAX_RESPONSE_BYTES, GATEWAY_METHOD_MAX_RESPONSE_BYTES, getTranscriptTail, getTranscriptTailById, listAgentsDetailed, respondToWidget, listAllAutomations, listSkills, sendPrompt } from "../src/core/gateway.js";
+import { GATEWAY_MAX_RESPONSE_BYTES, GATEWAY_METHOD_MAX_RESPONSE_BYTES, getTranscriptTail, gatewayEvents, getTranscriptTailById, listAgentsDetailed, respondToWidget, listAllAutomations, listSkills, sendPrompt } from "../src/core/gateway.js";
 
 const session = { gatewayUrl: "http://127.0.0.1:1340", gatewayToken: "t" };
 const roster = { agents: [{ id: "bot-1", name: "General" }] };
@@ -242,4 +242,26 @@ test("respondToWidget sends the chosen value once and checks its arguments", asy
   assert.deepEqual(seen, [["respondToWidget", { agentId: "bot-9", entryId: "t1s2", value: "yes" }]]);
   await assert.rejects(respondToWidget(session, { agentId: "bot-9", entryId: "t1s2", value: "" }));
   assert.equal(seen.length, 1);
+});
+
+test("gatewayEvents reads server-sent events from /events, skipping comments", async (t) => {
+  const seen = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    seen.push([String(url).split(".cursor.sh")[1] ?? String(url), options.method, options.headers.accept]);
+    const enc = new TextEncoder();
+    const body = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode(":echo hi\n\ndata: {\"channel\":\"transcript\","));
+        c.enqueue(enc.encode("\"payload\":{\"agentId\":\"b1\"}}\n\ndata: {\"channel\":\"agents\",\"payload\":[]}\n\n"));
+        c.close();
+      },
+    });
+    return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+  });
+  const got = [];
+  for await (const e of gatewayEvents(session)) got.push(e.data.channel);
+  assert.deepEqual(got, ["transcript", "agents"]);
+  assert.equal(seen[0][1], "GET");
+  assert.equal(seen[0][2], "text/event-stream");
+  assert.match(String(seen[0][0]), /\/events$/);
 });

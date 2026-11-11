@@ -574,6 +574,44 @@ export async function respondToWidget(session, { agentId, entryId, value, signal
   return gatewayCall(session, "respondToWidget", { agentId, entryId, value }, { signal });
 }
 
+// The gateway's live event stream (server-sent events), the one the app follows for new
+// messages. Read-only: yields { event, data } until `signal` aborts or the server closes it.
+export async function* gatewayEvents(session, { signal } = {}) {
+  const base = assertAllowedCredentialUrl(session.gatewayUrl, { kind: "gateway" });
+  const res = await fetch(base + "/events", {
+    method: "GET",
+    redirect: "error",
+    signal,
+    headers: { ...requestHeaders(session), accept: "text/event-stream" },
+  });
+  if (!res.ok || !res.body) throw new GatewayError(`gateway events failed: ${res.status}`, { status: res.status });
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for await (const chunk of res.body) {
+    buffer += decoder.decode(chunk, { stream: true });
+    let cut;
+    while ((cut = buffer.search(/\r?\n\r?\n/)) >= 0) {
+      const block = buffer.slice(0, cut);
+      buffer = buffer.slice(cut).replace(/^\r?\n\r?\n/, "");
+      let event = "message";
+      const data = [];
+      for (const line of block.split(/\r?\n/)) {
+        if (line.startsWith(":")) continue;
+        const i = line.indexOf(":");
+        const field = i < 0 ? line : line.slice(0, i);
+        const value = i < 0 ? "" : line.slice(i + 1).replace(/^ /, "");
+        if (field === "event") event = value;
+        else if (field === "data") data.push(value);
+      }
+      if (!data.length) continue;
+      const text = data.join("\n");
+      let parsed = text;
+      try { parsed = JSON.parse(text); } catch { /* not JSON */ }
+      yield { event, data: parsed };
+    }
+  }
+}
+
 export async function getThread(session, ref, rootId) {
   const rec = await resolveRef(session, ref);
   const data = await gatewayCall(session, "getAgentThread", { id: rec.id, rootId });

@@ -66051,6 +66051,55 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 signal
             });
         }
+        async function* gatewayEvents(session, { signal } = {}) {
+            const base = assertAllowedCredentialUrl(session.gatewayUrl, {
+                kind: "gateway"
+            });
+            const res = await fetch(base + "/events", {
+                method: "GET",
+                redirect: "error",
+                signal,
+                headers: {
+                    ...requestHeaders(session),
+                    accept: "text/event-stream"
+                }
+            });
+            if (!res.ok || !res.body) throw new GatewayError(`gateway events failed: ${res.status}`, {
+                status: res.status
+            });
+            const decoder = new TextDecoder();
+            let buffer = "";
+            for await (const chunk of res.body){
+                buffer += decoder.decode(chunk, {
+                    stream: true
+                });
+                let cut;
+                while((cut = buffer.search(/\r?\n\r?\n/)) >= 0){
+                    const block = buffer.slice(0, cut);
+                    buffer = buffer.slice(cut).replace(/^\r?\n\r?\n/, "");
+                    let event = "message";
+                    const data = [];
+                    for (const line of block.split(/\r?\n/)){
+                        if (line.startsWith(":")) continue;
+                        const i = line.indexOf(":");
+                        const field = i < 0 ? line : line.slice(0, i);
+                        const value = i < 0 ? "" : line.slice(i + 1).replace(/^ /, "");
+                        if (field === "event") event = value;
+                        else if (field === "data") data.push(value);
+                    }
+                    if (!data.length) continue;
+                    const text = data.join("\n");
+                    let parsed = text;
+                    try {
+                        parsed = JSON.parse(text);
+                    } catch  {}
+                    yield {
+                        event,
+                        data: parsed
+                    };
+                }
+            }
+        }
         async function getThread(session, ref, rootId) {
             const rec = await resolveRef(session, ref);
             const data = await gatewayCall(session, "getAgentThread", {
@@ -66201,7 +66250,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 ...envHeaders || {}
             };
         }
-        function requestHeaders(session) {
+        function requestHeaders1(session) {
             return {
                 "content-type": "application/json",
                 authorization: "Bearer " + session.gatewayToken,
@@ -66219,7 +66268,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             };
         }
         __webpack_require__.d(__webpack_exports__, {
-            A1: ()=>requestHeaders,
+            A1: ()=>requestHeaders1,
             Ew: ()=>headersFromEnsureSandbox,
             _6: ()=>ensureSandboxHeaders,
             bQ: ()=>mergeGatewayHeaders,
@@ -66947,7 +66996,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             const h = String(hostname || "").toLowerCase();
             return isCursorApiHostname(h) || h.endsWith(".cursorvm.com");
         }
-        function assertAllowedCredentialUrl(rawUrl, opts = {}) {
+        function assertAllowedCredentialUrl1(rawUrl, opts = {}) {
             const kind = opts.kind || "gateway";
             const label = kind === "backend" ? "backend URL" : "gateway URL";
             let parsed;
@@ -67004,7 +67053,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             return s;
         }
         __webpack_require__.d(__webpack_exports__, {
-            Re: ()=>assertAllowedCredentialUrl,
+            Re: ()=>assertAllowedCredentialUrl1,
             fp: ()=>redactSecrets
         });
     },
