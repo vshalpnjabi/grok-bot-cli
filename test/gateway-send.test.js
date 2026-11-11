@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
 
-import { GATEWAY_MAX_RESPONSE_BYTES, getTranscriptTail, sendPrompt } from "../src/core/gateway.js";
+import { GATEWAY_MAX_RESPONSE_BYTES, GATEWAY_METHOD_MAX_RESPONSE_BYTES, getTranscriptTail, listAllAutomations, listSkills, sendPrompt } from "../src/core/gateway.js";
 
 const session = { gatewayUrl: "http://127.0.0.1:1340", gatewayToken: "t" };
 const roster = { agents: [{ id: "bot-1", name: "General" }] };
@@ -180,6 +180,28 @@ test("sendPrompt preserves an unknown timeout without mutating its DOMException"
 test("oversized gateway responses abort mid-stream instead of buffering", async (t) => {
   mockGateway(t, () => new Response("x".repeat(GATEWAY_MAX_RESPONSE_BYTES + 8), { status: 200 }));
   await assert.rejects(sendPrompt(session, "General", "hi"), /too large/);
+});
+
+test("the skill library may exceed the general cap, up to its own", async (t) => {
+  const body = "y".repeat(GATEWAY_MAX_RESPONSE_BYTES);
+  const big = JSON.stringify({ workflows: [{ id: "s1", name: "Big", description: body, source: "automation" }] });
+  mockGateway(t, () => new Response(big, { status: 200 }));
+  const skills = await listSkills(session);
+  assert.deepEqual(skills.map((s) => [s.id, s.source]), [["s1", "automation"]]);
+  t.mock.restoreAll();
+  mockGateway(t, () => new Response("x".repeat(GATEWAY_METHOD_MAX_RESPONSE_BYTES.getAgentWorkflows + 8), { status: 200 }));
+  await assert.rejects(listSkills(session), /too large/);
+});
+
+test("listSkills asks for the named bot's automations; listAllAutomations sends no arguments", async (t) => {
+  const seen = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    seen.push([String(url).split("/api/")[1], JSON.parse(options.body)]);
+    return new Response(JSON.stringify(String(url).endsWith("listAllAutomations") ? [{ id: "a1" }] : { workflows: [] }), { status: 200 });
+  });
+  await listSkills(session, { botId: "bot-9" });
+  assert.deepEqual(await listAllAutomations(session), [{ id: "a1" }]);
+  assert.deepEqual(seen, [["getAgentWorkflows", { id: "bot-9" }], ["listAllAutomations", {}]]);
 });
 
 test("getTranscriptTail clamps the limit to 1-200 like the CLI and tool", async (t) => {

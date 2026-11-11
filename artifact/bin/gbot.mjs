@@ -48011,11 +48011,15 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         const GATEWAY_TIMEOUT_MS = 30000;
         const GATEWAY_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+        const GATEWAY_METHOD_MAX_RESPONSE_BYTES = {
+            getAgentWorkflows: 16 * 1024 * 1024
+        };
         const READ_ONLY_METHODS = new Set([
             "listAgents",
             "getAgentWorkflows",
             "getAgentTranscriptTail",
-            "getAgentThread"
+            "getAgentThread",
+            "listAllAutomations"
         ]);
         const reconnectStates = new WeakMap();
         function assertGatewayActive(signal) {
@@ -48101,8 +48105,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }
             return Buffer.concat(chunks.map((c)=>Buffer.from(c.buffer ?? c, c.byteOffset ?? 0, c.byteLength ?? c.length))).toString("utf8");
         }
-        async function readJson(res) {
-            const text = await readTextCapped(res, GATEWAY_MAX_RESPONSE_BYTES);
+        async function readJson(res, maxBytes = GATEWAY_MAX_RESPONSE_BYTES) {
+            const text = await readTextCapped(res, maxBytes);
             if (!text) return {};
             try {
                 return JSON.parse(text);
@@ -48266,7 +48270,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             let res, data;
             try {
                 res = await fetch(url, options);
-                data = await readJson(res);
+                data = await readJson(res, GATEWAY_METHOD_MAX_RESPONSE_BYTES[method]);
             } catch (error) {
                 if (!prompt) assertGatewayActive(signal);
                 throw error;
@@ -48429,10 +48433,15 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (!bot) throw new GatewayError("Skills need at least one bot. Run gbot bots create first.");
             return bot.id;
         }
-        async function listSkills(session) {
+        async function listSkills(session, { botId } = {}) {
             return asSkills(await gatewayCall(session, "getAgentWorkflows", {
-                id: await anyBotId(session)
+                id: botId ?? await anyBotId(session)
             }));
+        }
+        async function listAllAutomations(session, { signal } = {}) {
+            return gatewayCall(session, "listAllAutomations", {}, {
+                signal
+            });
         }
         async function addSkill(session, markdown) {
             const text = String(markdown);
