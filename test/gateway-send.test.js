@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
 
-import { GATEWAY_MAX_RESPONSE_BYTES, GATEWAY_METHOD_MAX_RESPONSE_BYTES, getTranscriptTail, getTranscriptTailById, listAgentsDetailed, listAllAutomations, listSkills, sendPrompt } from "../src/core/gateway.js";
+import { GATEWAY_MAX_RESPONSE_BYTES, GATEWAY_METHOD_MAX_RESPONSE_BYTES, getTranscriptTail, getTranscriptTailById, listAgentsDetailed, respondToWidget, listAllAutomations, listSkills, sendPrompt } from "../src/core/gateway.js";
 
 const session = { gatewayUrl: "http://127.0.0.1:1340", gatewayToken: "t" };
 const roster = { agents: [{ id: "bot-1", name: "General" }] };
@@ -230,4 +230,16 @@ test("getTranscriptTailById reads one id without a roster lookup", async (t) => 
   });
   assert.deepEqual(await getTranscriptTailById(session, "bot-9", { limit: 500 }), { entries: [{ id: "e1" }] });
   assert.deepEqual(seen, [["getAgentTranscriptTail", { id: "bot-9", limit: 200 }]]);
+});
+
+test("respondToWidget sends the chosen value once and checks its arguments", async (t) => {
+  const seen = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    seen.push([String(url).split("/api/")[1], JSON.parse(options.body)]);
+    return new Response(JSON.stringify({ accepted: true }), { status: 200 });
+  });
+  assert.deepEqual(await respondToWidget(session, { agentId: "bot-9", entryId: "t1s2", value: "yes" }), { accepted: true });
+  assert.deepEqual(seen, [["respondToWidget", { agentId: "bot-9", entryId: "t1s2", value: "yes" }]]);
+  await assert.rejects(respondToWidget(session, { agentId: "bot-9", entryId: "t1s2", value: "" }));
+  assert.equal(seen.length, 1);
 });

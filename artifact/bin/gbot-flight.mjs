@@ -30213,6 +30213,17 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 signal
             });
         }
+        async function respondToWidget(session, { agentId, entryId, value, signal } = {}) {
+            assertGatewayActive(signal);
+            if (!agentId || !entryId || typeof value !== "string" || !value) throw new GatewayError("respondToWidget needs agentId, entryId and a value.");
+            return gatewayCall(session, "respondToWidget", {
+                agentId,
+                entryId,
+                value
+            }, {
+                signal
+            });
+        }
         async function getThread(session, ref, rootId) {
             const rec = await resolveRef(session, ref);
             const data = await gatewayCall(session, "getAgentThread", {

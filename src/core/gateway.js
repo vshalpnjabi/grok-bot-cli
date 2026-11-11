@@ -565,6 +565,15 @@ export async function getTranscriptTailById(session, id, { limit = 40, signal } 
   return gatewayCall(session, "getAgentTranscriptTail", { id, limit: bounded }, { signal });
 }
 
+// Answers an options widget a bot posted (what clicking an option does in the app).
+// `value` is the option's value, or several joined by newlines for a multi-select. Sent once:
+// the gateway may already have it if this throws, so read the thread before answering again.
+export async function respondToWidget(session, { agentId, entryId, value, signal } = {}) {
+  assertGatewayActive(signal);
+  if (!agentId || !entryId || typeof value !== "string" || !value) throw new GatewayError("respondToWidget needs agentId, entryId and a value.");
+  return gatewayCall(session, "respondToWidget", { agentId, entryId, value }, { signal });
+}
+
 export async function getThread(session, ref, rootId) {
   const rec = await resolveRef(session, ref);
   const data = await gatewayCall(session, "getAgentThread", { id: rec.id, rootId });
