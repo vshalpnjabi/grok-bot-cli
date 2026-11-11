@@ -25862,6 +25862,15 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 transcript: data
             };
         }
+        async function getTranscriptTailById(session, id, { limit = 40, signal } = {}) {
+            const bounded = Math.min(Math.max(Math.trunc(limit) || 40, 1), 200);
+            return gatewayCall(session, "getAgentTranscriptTail", {
+                id,
+                limit: bounded
+            }, {
+                signal
+            });
+        }
         async function getThread(session, ref, rootId) {
             const rec = await resolveRef(session, ref);
             const data = await gatewayCall(session, "getAgentThread", {

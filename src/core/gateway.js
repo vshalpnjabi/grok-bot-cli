@@ -559,6 +559,12 @@ export async function getTranscriptTail(session, ref, limit = 40) {
   return { target: rec, transcript: data };
 }
 
+// The tail by bot id, without a roster lookup first (for callers that poll an id they already have).
+export async function getTranscriptTailById(session, id, { limit = 40, signal } = {}) {
+  const bounded = Math.min(Math.max(Math.trunc(limit) || 40, 1), 200);
+  return gatewayCall(session, "getAgentTranscriptTail", { id, limit: bounded }, { signal });
+}
+
 export async function getThread(session, ref, rootId) {
   const rec = await resolveRef(session, ref);
   const data = await gatewayCall(session, "getAgentThread", { id: rec.id, rootId });

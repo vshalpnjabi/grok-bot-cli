@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
 
-import { GATEWAY_MAX_RESPONSE_BYTES, GATEWAY_METHOD_MAX_RESPONSE_BYTES, getTranscriptTail, listAgentsDetailed, listAllAutomations, listSkills, sendPrompt } from "../src/core/gateway.js";
+import { GATEWAY_MAX_RESPONSE_BYTES, GATEWAY_METHOD_MAX_RESPONSE_BYTES, getTranscriptTail, getTranscriptTailById, listAgentsDetailed, listAllAutomations, listSkills, sendPrompt } from "../src/core/gateway.js";
 
 const session = { gatewayUrl: "http://127.0.0.1:1340", gatewayToken: "t" };
 const roster = { agents: [{ id: "bot-1", name: "General" }] };
@@ -220,4 +220,14 @@ test("getTranscriptTail clamps the limit to 1-200 like the CLI and tool", async 
   assert.equal(seen[0].limit, 200);
   await getTranscriptTail(session, "General", -3);
   assert.equal(seen[1].limit, 1);
+});
+
+test("getTranscriptTailById reads one id without a roster lookup", async (t) => {
+  const seen = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    seen.push([String(url).split("/api/")[1], JSON.parse(options.body)]);
+    return new Response(JSON.stringify({ entries: [{ id: "e1" }] }), { status: 200 });
+  });
+  assert.deepEqual(await getTranscriptTailById(session, "bot-9", { limit: 500 }), { entries: [{ id: "e1" }] });
+  assert.deepEqual(seen, [["getAgentTranscriptTail", { id: "bot-9", limit: 200 }]]);
 });
