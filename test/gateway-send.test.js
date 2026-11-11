@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
 
-import { GATEWAY_MAX_RESPONSE_BYTES, GATEWAY_METHOD_MAX_RESPONSE_BYTES, getTranscriptTail, listAllAutomations, listSkills, sendPrompt } from "../src/core/gateway.js";
+import { GATEWAY_MAX_RESPONSE_BYTES, GATEWAY_METHOD_MAX_RESPONSE_BYTES, getTranscriptTail, listAgentsDetailed, listAllAutomations, listSkills, sendPrompt } from "../src/core/gateway.js";
 
 const session = { gatewayUrl: "http://127.0.0.1:1340", gatewayToken: "t" };
 const roster = { agents: [{ id: "bot-1", name: "General" }] };
@@ -202,6 +202,11 @@ test("listSkills asks for the named bot's automations; listAllAutomations sends 
   await listSkills(session, { botId: "bot-9" });
   assert.deepEqual(await listAllAutomations(session), [{ id: "a1" }]);
   assert.deepEqual(seen, [["getAgentWorkflows", { id: "bot-9" }], ["listAllAutomations", {}]]);
+});
+
+test("listAgentsDetailed keeps the gateway's own fields", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify([{ id: "b1", name: "A", lastActivityAt: 5, unreadCount: 2 }, { name: "no id" }]), { status: 200 }));
+  assert.deepEqual(await listAgentsDetailed(session), [{ id: "b1", name: "A", lastActivityAt: 5, unreadCount: 2 }]);
 });
 
 test("getTranscriptTail clamps the limit to 1-200 like the CLI and tool", async (t) => {

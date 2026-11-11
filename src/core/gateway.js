@@ -302,6 +302,13 @@ export async function listAgents(session, { signal } = {}) {
   return unwrapList(data).map(asRecord).filter((r) => r && r.id);
 }
 
+// The roster as the gateway sends it: activity, previews, unread counts and
+// avatars that the summary records leave out. Read-only.
+export async function listAgentsDetailed(session, { signal } = {}) {
+  const data = await gatewayCall(session, "listAgents", {}, { signal });
+  return unwrapList(data).filter((r) => r && typeof r === "object" && r.id);
+}
+
 function resolveFromList(records, ref) {
   const needle = String(ref).trim().toLowerCase();
   const byId = records.find((r) => r.id.toLowerCase() === needle);

@@ -29911,6 +29911,12 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             });
             return unwrapList(data).map(asRecord).filter((r)=>r && r.id);
         }
+        async function listAgentsDetailed(session, { signal } = {}) {
+            const data = await gatewayCall(session, "listAgents", {}, {
+                signal
+            });
+            return unwrapList(data).filter((r)=>r && typeof r === "object" && r.id);
+        }
         function resolveFromList(records, ref) {
             const needle = String(ref).trim().toLowerCase();
             const byId = records.find((r)=>r.id.toLowerCase() === needle);
