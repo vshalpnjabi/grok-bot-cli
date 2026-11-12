@@ -25975,6 +25975,57 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 delivery: "unknown"
             };
         }
+        async function markAgentRead(session, id, { serverRun = false, signal } = {}) {
+            assertGatewayActive(signal);
+            if (!serverRun) {
+                try {
+                    await gatewayCall(session, "setAgentUnread", {
+                        id: String(id),
+                        isUnread: false
+                    }, {
+                        signal
+                    });
+                    return {
+                        ok: true,
+                        route: "gateway"
+                    };
+                } catch (err) {
+                    if (!(err instanceof GatewayError && err.status === 409)) throw err;
+                }
+            }
+            const { accessToken, teamId } = serverCredentials();
+            const url = assertAllowedCredentialUrl(backendBase(), {
+                kind: "backend"
+            }) + "/aiserver.v1.GrokBotService/SetGrokBotAgentClientState";
+            const res = await fetch(url, {
+                method: "POST",
+                redirect: "error",
+                signal: gatewayDeadline(signal),
+                headers: {
+                    ...ensureSandboxHeaders(accessToken),
+                    ...teamId === undefined ? {} : {
+                        "x-cursor-team-id": teamId
+                    }
+                },
+                body: JSON.stringify({
+                    agentId: String(id),
+                    markRead: true
+                })
+            });
+            const data = await readJson(res);
+            if (!res.ok) {
+                const detail = data.message || data.error || data.raw || res.statusText;
+                throw new GatewayError("SetGrokBotAgentClientState failed: " + res.status + " " + redactSecrets(detail), {
+                    status: res.status,
+                    method: "SetGrokBotAgentClientState"
+                });
+            }
+            return {
+                ok: true,
+                route: "server",
+                state: data.state ?? null
+            };
+        }
         async function transcriptEntryIdForNonce(session, agentId, clientNonce, signal) {
             try {
                 const data = await gatewayCall(session, "getAgentTranscriptTail", {
@@ -26225,7 +26276,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 ...session.gatewayHeaders || {}
             };
         }
-        function ensureSandboxHeaders(accessToken) {
+        function ensureSandboxHeaders1(accessToken) {
             return {
                 "content-type": "application/json",
                 "connect-protocol-version": "1",
@@ -26238,7 +26289,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         __webpack_require__.d(__webpack_exports__, {
             A1: ()=>requestHeaders1,
             Ew: ()=>headersFromEnsureSandbox,
-            _6: ()=>ensureSandboxHeaders,
+            _6: ()=>ensureSandboxHeaders1,
             bQ: ()=>mergeGatewayHeaders,
             dk: ()=>normalizeHeaderMap,
             gx: ()=>headersFromEnv
@@ -28605,7 +28656,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }
             return String(rawUrl).replace(/\/$/, "");
         }
-        function redactSecrets(text) {
+        function redactSecrets1(text) {
             let s = String(text);
             s = s.replace(/(^|[\s,{;])((?:set-cookie|cookie)\s*[:=]\s*)([^\n;]+?)(?=\s+(?:set-cookie|cookie|authorization|proxy-authorization)\b|\s*$)/gi, "$1$2<redacted>");
             s = s.replace(/(^|[\s,{;])((?:authorization|proxy-authorization)\s*[:=]\s*)(\S+(?:\s+\S+)?)/gi, "$1$2<redacted>");
@@ -28616,7 +28667,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         __webpack_require__.d(__webpack_exports__, {
             Re: ()=>assertAllowedCredentialUrl1,
-            fp: ()=>redactSecrets
+            fp: ()=>redactSecrets1
         });
     },
     "./src/core/user-machine-guidance.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {

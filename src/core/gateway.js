@@ -626,6 +626,36 @@ export async function sendServerPrompt(body, { signal } = {}) {
   return { result: data, delivery: "unknown" };
 }
 
+// Marks a bot's conversation read, as opening it in the desktop app does. Server-run
+// bots keep their read marker on the backend; box bots on the gateway.
+export async function markAgentRead(session, id, { serverRun = false, signal } = {}) {
+  assertGatewayActive(signal);
+  if (!serverRun) {
+    try {
+      await gatewayCall(session, "setAgentUnread", { id: String(id), isUnread: false }, { signal });
+      return { ok: true, route: "gateway" };
+    } catch (err) {
+      // The gateway refuses (409) a bot it doesn't run; that bot's marker is on the backend.
+      if (!(err instanceof GatewayError && err.status === 409)) throw err;
+    }
+  }
+  const { accessToken, teamId } = serverCredentials();
+  const url = assertAllowedCredentialUrl(backendBase(), { kind: "backend" }) + "/aiserver.v1.GrokBotService/SetGrokBotAgentClientState";
+  const res = await fetch(url, {
+    method: "POST",
+    redirect: "error",
+    signal: gatewayDeadline(signal),
+    headers: { ...ensureSandboxHeaders(accessToken), ...(teamId === undefined ? {} : { "x-cursor-team-id": teamId }) },
+    body: JSON.stringify({ agentId: String(id), markRead: true }),
+  });
+  const data = await readJson(res);
+  if (!res.ok) {
+    const detail = data.message || data.error || data.raw || res.statusText;
+    throw new GatewayError("SetGrokBotAgentClientState failed: " + res.status + " " + redactSecrets(detail), { status: res.status, method: "SetGrokBotAgentClientState" });
+  }
+  return { ok: true, route: "server", state: data.state ?? null };
+}
+
 // Best effort: any failure leaves the send `unknown` rather than throwing after the prompt left.
 async function transcriptEntryIdForNonce(session, agentId, clientNonce, signal) {
   try {

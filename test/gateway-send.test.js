@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
 
-import { GATEWAY_MAX_RESPONSE_BYTES, GATEWAY_METHOD_MAX_RESPONSE_BYTES, getTranscriptTail, gatewayEvents, getTranscriptTailById, listAgentsDetailed, respondToWidget, listAllAutomations, listSkills, sendPrompt } from "../src/core/gateway.js";
+import { GATEWAY_MAX_RESPONSE_BYTES, GATEWAY_METHOD_MAX_RESPONSE_BYTES, getTranscriptTail, gatewayEvents, getTranscriptTailById, listAgentsDetailed, markAgentRead, respondToWidget, listAllAutomations, listSkills, sendPrompt } from "../src/core/gateway.js";
 
 const session = { gatewayUrl: "http://127.0.0.1:1340", gatewayToken: "t" };
 const roster = { agents: [{ id: "bot-1", name: "General" }] };
@@ -321,4 +321,37 @@ test("a refused server-run send is rejected, not unknown", async (t) => {
     sendPrompt({ gatewayUrl: "http://127.0.0.1:1340", gatewayToken: "g" }, "bot-9", "hello"),
     (e) => e.delivery === "rejected" && /Bot is paused/.test(e.message),
   );
+});
+
+test("markAgentRead uses the gateway for box bots and the backend for server-run bots", async (t) => {
+  const oldEnv = { ...process.env };
+  Object.assign(process.env, { GROK_BOT_TEST: "1", CURSOR_ACCESS_TOKEN: "fixture-token", CURSOR_API_BASE_URL: "http://127.0.0.1:1341" });
+  t.after(() => { process.env = oldEnv; });
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    calls.push({ url, body: JSON.parse(options.body) });
+    return Response.json(url.includes("SetGrokBotAgentClientState") ? { state: { unreadCount: 0 } } : {});
+  });
+  const session = { gatewayUrl: "http://127.0.0.1:1340", gatewayToken: "g" };
+  assert.equal((await markAgentRead(session, "box-1")).route, "gateway");
+  assert.equal((await markAgentRead(session, "srv-1", { serverRun: true })).route, "server");
+  assert.deepEqual(calls, [
+    { url: "http://127.0.0.1:1340/api/setAgentUnread", body: { id: "box-1", isUnread: false } },
+    { url: "http://127.0.0.1:1341/aiserver.v1.GrokBotService/SetGrokBotAgentClientState", body: { agentId: "srv-1", markRead: true } },
+  ]);
+});
+
+test("markAgentRead falls back to the backend when the gateway refuses a server-run bot", async (t) => {
+  const oldEnv = { ...process.env };
+  Object.assign(process.env, { GROK_BOT_TEST: "1", CURSOR_ACCESS_TOKEN: "fixture-token", CURSOR_API_BASE_URL: "http://127.0.0.1:1341" });
+  t.after(() => { process.env = oldEnv; });
+  const urls = [];
+  t.mock.method(globalThis, "fetch", async (url) => {
+    urls.push(url);
+    if (url.endsWith("/api/setAgentUnread")) return Response.json({ message: "Nothing was saved." }, { status: 409 });
+    return Response.json({ state: {} });
+  });
+  const out = await markAgentRead({ gatewayUrl: "http://127.0.0.1:1340", gatewayToken: "g" }, "srv-1");
+  assert.equal(out.route, "server");
+  assert.equal(urls.length, 2);
 });
