@@ -516,7 +516,8 @@ export const RENDERED_CARD_KINDS = Object.freeze([
 
 export async function sendPrompt(session, ref, prompt, extra = {}) {
   assertGatewayActive(extra.signal);
-  const rec = await resolveRef(session, ref, { signal: extra.signal });
+  // `byId` skips the roster read (about a second) when the caller already has the bot id.
+  const rec = extra.byId ? { id: String(ref) } : await resolveRef(session, ref, { signal: extra.signal });
   const body = {
     agentId: rec.id,
     prompt,
@@ -525,6 +526,8 @@ export async function sendPrompt(session, ref, prompt, extra = {}) {
     renderedCardKinds: [...RENDERED_CARD_KINDS],
   };
   if (extra.replyToId) body.replyToId = extra.replyToId;
+  // A caller that knows the bot runs on the server skips the gateway's 409 round trip.
+  if (extra.serverRun) return { target: rec, route: "server", ...(await sendServerPrompt(body, { signal: extra.signal })) };
   let data;
   try {
     data = await gatewayCall(session, "sendPrompt", body, { signal: extra.signal });
@@ -533,7 +536,7 @@ export async function sendPrompt(session, ref, prompt, extra = {}) {
     // sends to them through the backend instead. The 409 means nothing was delivered,
     // and the retry reuses the clientNonce as the message id, which the backend dedupes.
     if (err instanceof GatewayError && err.status === 409 && /runs on the server/i.test(err.message)) {
-      return { target: rec, ...(await sendServerPrompt(body, { signal: extra.signal })) };
+      return { target: rec, route: "server", ...(await sendServerPrompt(body, { signal: extra.signal })) };
     }
     // Delivery states: the server answered no (rejected) vs the request may have landed (unknown).
     // Never retry an unknown delivery blindly; read the thread first.

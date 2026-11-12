@@ -291,6 +291,21 @@ test("sendPrompt to a server-run bot falls back to SendGrokBotUserMessage with t
   assert.equal(server.body.messageId, "nonce-1");
   assert.equal(server.body.text, "hello");
   assert.equal(server.body.rendersMcpElicitationForms, true);
+  assert.equal(out.route, "server");
+});
+
+test("sendPrompt byId + serverRun goes straight to the backend, no roster or gateway call", async (t) => {
+  const oldEnv = { ...process.env };
+  Object.assign(process.env, { GROK_BOT_TEST: "1", CURSOR_ACCESS_TOKEN: "fixture-token", CURSOR_API_BASE_URL: "http://127.0.0.1:1341" });
+  t.after(() => { process.env = oldEnv; });
+  const urls = [];
+  t.mock.method(globalThis, "fetch", async (url) => {
+    urls.push(url);
+    return Response.json({ delivery: "GROK_BOT_USER_MESSAGE_DELIVERY_ACCEPTED_TEMPORAL" });
+  });
+  const out = await sendPrompt({ gatewayUrl: "http://127.0.0.1:1340", gatewayToken: "g" }, "bot-9", "hi", { byId: true, serverRun: true });
+  assert.equal(out.delivery, "accepted");
+  assert.deepEqual(urls, ["http://127.0.0.1:1341/aiserver.v1.GrokBotService/SendGrokBotUserMessage"]);
 });
 
 test("a refused server-run send is rejected, not unknown", async (t) => {

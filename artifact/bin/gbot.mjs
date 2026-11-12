@@ -48586,7 +48586,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         ]);
         async function sendPrompt(session, ref, prompt, extra = {}) {
             assertGatewayActive(extra.signal);
-            const rec = await resolveRef(session, ref, {
+            const rec = extra.byId ? {
+                id: String(ref)
+            } : await resolveRef(session, ref, {
                 signal: extra.signal
             });
             const body = {
@@ -48599,6 +48601,13 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 ]
             };
             if (extra.replyToId) body.replyToId = extra.replyToId;
+            if (extra.serverRun) return {
+                target: rec,
+                route: "server",
+                ...await sendServerPrompt(body, {
+                    signal: extra.signal
+                })
+            };
             let data;
             try {
                 data = await gatewayCall(session, "sendPrompt", body, {
@@ -48608,6 +48617,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 if (err instanceof GatewayError && err.status === 409 && /runs on the server/i.test(err.message)) {
                     return {
                         target: rec,
+                        route: "server",
                         ...await sendServerPrompt(body, {
                             signal: extra.signal
                         })
