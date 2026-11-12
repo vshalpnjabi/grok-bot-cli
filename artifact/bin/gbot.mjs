@@ -48605,6 +48605,14 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     signal: extra.signal
                 });
             } catch (err) {
+                if (err instanceof GatewayError && err.status === 409 && /runs on the server/i.test(err.message)) {
+                    return {
+                        target: rec,
+                        ...await sendServerPrompt(body, {
+                            signal: extra.signal
+                        })
+                    };
+                }
                 const delivery = err?.delivery ?? (err instanceof GatewayError && err.status != null && err.status < 500 ? "rejected" : "unknown");
                 const error = delivery === "unknown" && err instanceof Error && !/delivery unknown/.test(err.message) ? Object.assign(new Error(err.message, {
                     cause: err
@@ -48627,6 +48635,105 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 ...messageId ? {
                     messageId
                 } : {}
+            };
+        }
+        function serverCredentials() {
+            const token = accessTokenFromEnv();
+            if (token) return {
+                accessToken: token
+            };
+            const credentials = (0, _app_session_js__rspack_import_2.gF)();
+            if (!credentials?.accessToken) throw new GatewayError("No Grok Bot sign-in found to message a server-run bot.", {
+                delivery: "rejected"
+            });
+            return credentials;
+        }
+        function deviceTimeZone() {
+            try {
+                return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+            } catch  {
+                return undefined;
+            }
+        }
+        async function sendServerPrompt(body, { signal } = {}) {
+            assertGatewayActive(signal);
+            const { accessToken, teamId } = serverCredentials();
+            const url = (0, _url_policy_js__rspack_import_4.Re)(backendBase(), {
+                kind: "backend"
+            }) + "/aiserver.v1.GrokBotService/SendGrokBotUserMessage";
+            const zone = deviceTimeZone();
+            const request = {
+                agentId: body.agentId,
+                messageId: body.clientNonce,
+                text: body.prompt,
+                sentAtMs: String(Date.now()),
+                ...body.replyToId ? {
+                    replyToId: body.replyToId
+                } : {},
+                isFork: false,
+                attachmentPaths: [],
+                attachmentNames: [],
+                source: 1,
+                initiator: 1,
+                sendSource: 1,
+                rendersMcpElicitationForms: true,
+                renderedCardKinds: [
+                    ...RENDERED_CARD_KINDS
+                ]
+            };
+            let res, data;
+            try {
+                res = await fetch(url, {
+                    method: "POST",
+                    redirect: "error",
+                    signal: gatewayDeadline(),
+                    headers: {
+                        ...(0, _headers_js__rspack_import_1._6)(accessToken),
+                        ...teamId === undefined ? {} : {
+                            "x-cursor-team-id": teamId
+                        },
+                        ...zone ? {
+                            "x-cursor-timezone": zone
+                        } : {}
+                    },
+                    body: JSON.stringify(request)
+                });
+                data = await readJson(res);
+            } catch (error) {
+                throw Object.assign(new GatewayError((error?.message || String(error)) + " (delivery unknown; check the thread before resending)"), {
+                    delivery: "unknown"
+                });
+            }
+            if (!res.ok) {
+                const detail = data.message || data.error || data.raw || res.statusText;
+                throw Object.assign(new GatewayError("SendGrokBotUserMessage failed: " + res.status + " " + (0, _url_policy_js__rspack_import_4.fp)(detail), {
+                    status: res.status,
+                    method: "SendGrokBotUserMessage"
+                }), {
+                    delivery: res.status < 500 ? "rejected" : "unknown"
+                });
+            }
+            const outcome = String(data.delivery ?? "");
+            if (/ACCEPTED_BOX|ACCEPTED_TEMPORAL|DUPLICATE/.test(outcome) || [
+                "1",
+                "2",
+                "3"
+            ].includes(outcome)) {
+                return {
+                    result: data,
+                    delivery: "accepted",
+                    messageId: body.clientNonce
+                };
+            }
+            if (/REFUSED/.test(outcome) || outcome === "4") {
+                const why = data.refusal?.message || data.refusal?.detail || "the server refused the message";
+                throw Object.assign(new GatewayError("Not sent: " + (0, _url_policy_js__rspack_import_4.fp)(String(why))), {
+                    delivery: "rejected"
+                });
+            }
+            return {
+                result: data,
+                delivery: "unknown"
             };
         }
         async function transcriptEntryIdForNonce(session, agentId, clientNonce, signal) {

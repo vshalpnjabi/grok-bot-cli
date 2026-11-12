@@ -529,6 +529,12 @@ export async function sendPrompt(session, ref, prompt, extra = {}) {
   try {
     data = await gatewayCall(session, "sendPrompt", body, { signal: extra.signal });
   } catch (err) {
+    // Server-run (Temporal) bots aren't served by the box gateway; the desktop app
+    // sends to them through the backend instead. The 409 means nothing was delivered,
+    // and the retry reuses the clientNonce as the message id, which the backend dedupes.
+    if (err instanceof GatewayError && err.status === 409 && /runs on the server/i.test(err.message)) {
+      return { target: rec, ...(await sendServerPrompt(body, { signal: extra.signal })) };
+    }
     // Delivery states: the server answered no (rejected) vs the request may have landed (unknown).
     // Never retry an unknown delivery blindly; read the thread first.
     const delivery = err?.delivery ?? (err instanceof GatewayError && err.status != null && err.status < 500 ? "rejected" : "unknown");
@@ -549,6 +555,72 @@ export async function sendPrompt(session, ref, prompt, extra = {}) {
   // Only a confirmed receipt counts as accepted; anything else is unknown, never a silent accept.
   // ponytail: full send/execution correlation envelope stays in #37.
   return { target: rec, result: data && typeof data === "object" ? data : {}, delivery: messageId ? "accepted" : "unknown", ...(messageId ? { messageId } : {}) };
+}
+
+function serverCredentials() {
+  const token = accessTokenFromEnv();
+  if (token) return { accessToken: token };
+  const credentials = loadGrokBotAppCredentials();
+  if (!credentials?.accessToken) throw new GatewayError("No Grok Bot sign-in found to message a server-run bot.", { delivery: "rejected" });
+  return credentials;
+}
+
+function deviceTimeZone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined; } catch { return undefined; }
+}
+
+// GrokBotService.SendGrokBotUserMessage, as the desktop app calls it for server-run bots.
+export async function sendServerPrompt(body, { signal } = {}) {
+  assertGatewayActive(signal);
+  const { accessToken, teamId } = serverCredentials();
+  const url = assertAllowedCredentialUrl(backendBase(), { kind: "backend" }) + "/aiserver.v1.GrokBotService/SendGrokBotUserMessage";
+  const zone = deviceTimeZone();
+  const request = {
+    agentId: body.agentId,
+    messageId: body.clientNonce,
+    text: body.prompt,
+    sentAtMs: String(Date.now()),
+    ...(body.replyToId ? { replyToId: body.replyToId } : {}),
+    isFork: false,
+    attachmentPaths: [],
+    attachmentNames: [],
+    source: 1, // DESKTOP
+    initiator: 1, // USER
+    sendSource: 1, // CHAT
+    rendersMcpElicitationForms: true,
+    renderedCardKinds: [...RENDERED_CARD_KINDS],
+  };
+  let res, data;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      redirect: "error",
+      signal: gatewayDeadline(),
+      headers: {
+        ...ensureSandboxHeaders(accessToken),
+        ...(teamId === undefined ? {} : { "x-cursor-team-id": teamId }),
+        ...(zone ? { "x-cursor-timezone": zone } : {}),
+      },
+      body: JSON.stringify(request),
+    });
+    data = await readJson(res);
+  } catch (error) {
+    // The request may have reached the server; never claim it was refused.
+    throw Object.assign(new GatewayError((error?.message || String(error)) + " (delivery unknown; check the thread before resending)"), { delivery: "unknown" });
+  }
+  if (!res.ok) {
+    const detail = data.message || data.error || data.raw || res.statusText;
+    throw Object.assign(new GatewayError("SendGrokBotUserMessage failed: " + res.status + " " + redactSecrets(detail), { status: res.status, method: "SendGrokBotUserMessage" }), { delivery: res.status < 500 ? "rejected" : "unknown" });
+  }
+  const outcome = String(data.delivery ?? "");
+  if (/ACCEPTED_BOX|ACCEPTED_TEMPORAL|DUPLICATE/.test(outcome) || ["1", "2", "3"].includes(outcome)) {
+    return { result: data, delivery: "accepted", messageId: body.clientNonce };
+  }
+  if (/REFUSED/.test(outcome) || outcome === "4") {
+    const why = data.refusal?.message || data.refusal?.detail || "the server refused the message";
+    throw Object.assign(new GatewayError("Not sent: " + redactSecrets(String(why))), { delivery: "rejected" });
+  }
+  return { result: data, delivery: "unknown" };
 }
 
 // Best effort: any failure leaves the send `unknown` rather than throwing after the prompt left.

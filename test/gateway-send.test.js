@@ -268,3 +268,42 @@ test("gatewayEvents reads server-sent events from /events, skipping comments", a
   assert.equal(seen[0][2], "text/event-stream");
   assert.match(String(seen[0][0]), /\/events$/);
 });
+
+test("sendPrompt to a server-run bot falls back to SendGrokBotUserMessage with the same nonce", async (t) => {
+  const oldEnv = { ...process.env };
+  Object.assign(process.env, { GROK_BOT_TEST: "1", CURSOR_ACCESS_TOKEN: "fixture-token", CURSOR_API_BASE_URL: "http://127.0.0.1:1341" });
+  t.after(() => { process.env = oldEnv; });
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    calls.push({ url, headers: options.headers, body: options.body ? JSON.parse(options.body) : null });
+    if (url.endsWith("/api/listAgents")) return Response.json({ agents: [{ id: "bot-9", name: "Cloud" }] });
+    if (url.endsWith("/api/sendPrompt")) return Response.json({ message: "This Bot runs on the server, and this version of the app can't message it. Update the app and try again." }, { status: 409 });
+    if (url.endsWith("/aiserver.v1.GrokBotService/SendGrokBotUserMessage")) return Response.json({ dispatched: true, delivery: "GROK_BOT_USER_MESSAGE_DELIVERY_ACCEPTED_TEMPORAL" });
+    throw new Error("unexpected " + url);
+  });
+  const out = await sendPrompt({ gatewayUrl: "http://127.0.0.1:1340", gatewayToken: "g" }, "bot-9", "hello", { clientNonce: "nonce-1" });
+  assert.equal(out.delivery, "accepted");
+  assert.equal(out.messageId, "nonce-1");
+  const server = calls.at(-1);
+  assert.equal(server.url, "http://127.0.0.1:1341/aiserver.v1.GrokBotService/SendGrokBotUserMessage");
+  assert.equal(server.headers.authorization, "Bearer fixture-token");
+  assert.equal(server.body.agentId, "bot-9");
+  assert.equal(server.body.messageId, "nonce-1");
+  assert.equal(server.body.text, "hello");
+  assert.equal(server.body.rendersMcpElicitationForms, true);
+});
+
+test("a refused server-run send is rejected, not unknown", async (t) => {
+  const oldEnv = { ...process.env };
+  Object.assign(process.env, { GROK_BOT_TEST: "1", CURSOR_ACCESS_TOKEN: "fixture-token", CURSOR_API_BASE_URL: "http://127.0.0.1:1341" });
+  t.after(() => { process.env = oldEnv; });
+  t.mock.method(globalThis, "fetch", async (url) => {
+    if (url.endsWith("/api/listAgents")) return Response.json({ agents: [{ id: "bot-9", name: "Cloud" }] });
+    if (url.endsWith("/api/sendPrompt")) return Response.json({ message: "This Bot runs on the server." }, { status: 409 });
+    return Response.json({ delivery: "GROK_BOT_USER_MESSAGE_DELIVERY_REFUSED", refusal: { message: "Bot is paused" } });
+  });
+  await assert.rejects(
+    sendPrompt({ gatewayUrl: "http://127.0.0.1:1340", gatewayToken: "g" }, "bot-9", "hello"),
+    (e) => e.delivery === "rejected" && /Bot is paused/.test(e.message),
+  );
+});
