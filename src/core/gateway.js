@@ -505,6 +505,15 @@ export async function removeGroupMember(session, groupRef, memberRef) {
   return setGroupMembers(session, group.id, next);
 }
 
+// The card kinds the desktop app says it renders. Server-run bots refuse a
+// sendPrompt (409 "this version of the app can't message it") from a client that
+// doesn't declare it renders cards and MCP forms, so send what the app sends.
+export const RENDERED_CARD_KINDS = Object.freeze([
+  "shopping", "weather", "flights", "flight_detail", "flight_travelers", "hotels", "hotel_detail",
+  "hotel_detail_without_rooms", "hotel_book", "hotel_results_book",
+  "places", "dining", "x", "car_rentals", "car_rental_detail", "car_rental_locations", "car_rental_location",
+]);
+
 export async function sendPrompt(session, ref, prompt, extra = {}) {
   assertGatewayActive(extra.signal);
   const rec = await resolveRef(session, ref, { signal: extra.signal });
@@ -512,6 +521,8 @@ export async function sendPrompt(session, ref, prompt, extra = {}) {
     agentId: rec.id,
     prompt,
     clientNonce: extra.clientNonce || randomUUID(),
+    rendersMcpElicitationForms: true,
+    renderedCardKinds: [...RENDERED_CARD_KINDS],
   };
   if (extra.replyToId) body.replyToId = extra.replyToId;
   let data;

@@ -30136,6 +30136,25 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             const next = group.memberIds.filter((id)=>id !== member.id);
             return setGroupMembers(session, group.id, next);
         }
+        const RENDERED_CARD_KINDS = Object.freeze([
+            "shopping",
+            "weather",
+            "flights",
+            "flight_detail",
+            "flight_travelers",
+            "hotels",
+            "hotel_detail",
+            "hotel_detail_without_rooms",
+            "hotel_book",
+            "hotel_results_book",
+            "places",
+            "dining",
+            "x",
+            "car_rentals",
+            "car_rental_detail",
+            "car_rental_locations",
+            "car_rental_location"
+        ]);
         async function sendPrompt(session, ref, prompt, extra = {}) {
             assertGatewayActive(extra.signal);
             const rec = await resolveRef(session, ref, {
@@ -30144,7 +30163,11 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             const body = {
                 agentId: rec.id,
                 prompt,
-                clientNonce: extra.clientNonce || (0, node_crypto__rspack_import_0.randomUUID)()
+                clientNonce: extra.clientNonce || (0, node_crypto__rspack_import_0.randomUUID)(),
+                rendersMcpElicitationForms: true,
+                renderedCardKinds: [
+                    ...RENDERED_CARD_KINDS
+                ]
             };
             if (extra.replyToId) body.replyToId = extra.replyToId;
             let data;

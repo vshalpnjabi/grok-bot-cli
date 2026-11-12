@@ -5,6 +5,7 @@ import { sendToCodexThread } from "../src/core/codex-bridge.js";
 import { pageEntries } from "../src/core/relay/records.js";
 import { transcriptEntries } from "../src/core/transcript.js";
 import { openBackend } from "../src/core/commands.js";
+import { RENDERED_CARD_KINDS } from "../src/core/gateway.js";
 
 const envelope = { messageId: "caller-message", correlationId: "caller-correlation", hop: 0, header: false };
 test("PR69 keeps conversation imports and persistent session APIs usable", async () => {
@@ -54,7 +55,7 @@ test("PR69 backend forwards durable nonce and reply constraints", async (t) => {
   });
   const backend = await openBackend({ gateway: true });
   await backend.send("bot-1", "hello", { clientNonce: "durable-nonce", replyToId: "parent-message" });
-  assert.deepEqual(sent, [{ agentId: "bot-1", prompt: "hello", clientNonce: "durable-nonce", replyToId: "parent-message" }]);
+  assert.deepEqual(sent, [{ agentId: "bot-1", prompt: "hello", clientNonce: "durable-nonce", rendersMcpElicitationForms: true, renderedCardKinds: [...RENDERED_CARD_KINDS], replyToId: "parent-message" }]);
 });
 
 const entries = [{ id: "source-1", kind: "user-message" }];

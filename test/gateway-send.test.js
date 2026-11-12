@@ -38,6 +38,9 @@ test("test mode: a loopback gateway is served, a live gateway host is refused be
   });
   assert.deepEqual(received.map((r) => r.url), ["/api/listAgents", "/api/sendPrompt"]);
   assert.equal(received[1].body.prompt, "hi");
+  // Server-run bots refuse (409) a client that doesn't say it renders cards and forms.
+  assert.equal(received[1].body.rendersMcpElicitationForms, true);
+  assert.ok(Array.isArray(received[1].body.renderedCardKinds) && received[1].body.renderedCardKinds.length > 0);
 
   // A non-routable host, and the production escape hatch switched on: production
   // policy would let this through, test mode must still refuse it.
