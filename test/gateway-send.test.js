@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
 
-import { GATEWAY_MAX_RESPONSE_BYTES, GATEWAY_METHOD_MAX_RESPONSE_BYTES, getTranscriptTail, gatewayEvents, getTranscriptTailById, listAgentsDetailed, markAgentRead, respondToWidget, listAllAutomations, listSkills, sendPrompt } from "../src/core/gateway.js";
+import { GATEWAY_MAX_RESPONSE_BYTES, GATEWAY_METHOD_MAX_RESPONSE_BYTES, getTranscriptTail, gatewayEvents, getTranscriptTailById, getUsage, listAgentsDetailed, markAgentRead, respondToWidget, listAllAutomations, listSkills, sendPrompt } from "../src/core/gateway.js";
 
 const session = { gatewayUrl: "http://127.0.0.1:1340", gatewayToken: "t" };
 const roster = { agents: [{ id: "bot-1", name: "General" }] };
@@ -354,4 +354,25 @@ test("markAgentRead falls back to the backend when the gateway refuses a server-
   const out = await markAgentRead({ gatewayUrl: "http://127.0.0.1:1340", gatewayToken: "g" }, "srv-1");
   assert.equal(out.route, "server");
   assert.equal(urls.length, 2);
+});
+
+test("getUsage sums each bot's weekly share and reads the plan's status", async (t) => {
+  const oldEnv = { ...process.env };
+  Object.assign(process.env, { GROK_BOT_TEST: "1", CURSOR_ACCESS_TOKEN: "fixture-token", CURSOR_API_BASE_URL: "http://127.0.0.1:1341" });
+  t.after(() => { process.env = oldEnv; });
+  t.mock.method(globalThis, "fetch", async (url) => {
+    if (url.endsWith("/aiserver.v1.DashboardService/GetSandUsageStatus")) {
+      return Response.json({ usagePercent: 21.7, nextResetTimestampUtc: "2026-11-15T07:45:36.141Z", currentPeriodStart: "2026-11-09T06:39:27.982Z", grokPlanLabel: "Grok Bot Plan", cursorPlanName: "Ultra", hasAvailableUsage: true });
+    }
+    if (url.endsWith("/aiserver.v1.DashboardService/GetGrokBotUsageBreakdown")) {
+      return Response.json({ weeklyLimitPpm: { byBot: [{ dayMs: "1", botId: "a", ppm: 15000 }, { dayMs: "2", botId: "a", ppm: 5000 }, { dayMs: "1", botId: "b", ppm: 1000 }, { dayMs: "1", ppm: 9 }] } });
+    }
+    throw new Error("unexpected " + url);
+  });
+  const u = await getUsage();
+  assert.equal(u.percent, 21.7);
+  assert.equal(u.resetsAt, Date.parse("2026-11-15T07:45:36.141Z"));
+  assert.equal(u.plan, "Grok Bot Plan");
+  assert.equal(u.window, "week");
+  assert.deepEqual(u.byBot, { a: 2, b: 0.1 });
 });

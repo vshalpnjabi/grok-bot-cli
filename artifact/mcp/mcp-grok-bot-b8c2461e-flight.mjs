@@ -28980,6 +28980,69 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 state: data.state ?? null
             };
         }
+        async function dashboardCall(method, body, { signal } = {}) {
+            const { accessToken, teamId } = serverCredentials();
+            const url = assertAllowedCredentialUrl(backendBase(), {
+                kind: "backend"
+            }) + "/aiserver.v1.DashboardService/" + method;
+            const res = await fetch(url, {
+                method: "POST",
+                redirect: "error",
+                signal: gatewayDeadline(signal),
+                headers: {
+                    ...ensureSandboxHeaders(accessToken),
+                    ...teamId === undefined ? {} : {
+                        "x-cursor-team-id": teamId
+                    }
+                },
+                body: JSON.stringify(body)
+            });
+            const data = await readJson(res);
+            if (!res.ok) {
+                const detail = data.message || data.error || data.raw || res.statusText;
+                throw new GatewayError(method + " failed: " + res.status + " " + redactSecrets(detail), {
+                    status: res.status,
+                    method
+                });
+            }
+            return data;
+        }
+        const toMs = (v)=>{
+            if (v == null || v === "") return null;
+            const n = typeof v === "string" && !/^\d+$/.test(v) ? Date.parse(v) : Number(v);
+            return Number.isFinite(n) ? n : null;
+        };
+        async function getUsage({ signal } = {}) {
+            const [status, breakdown] = await Promise.all([
+                dashboardCall("GetSandUsageStatus", {}, {
+                    signal
+                }),
+                dashboardCall("GetGrokBotUsageBreakdown", {}, {
+                    signal
+                }).catch(()=>({}))
+            ]);
+            const split = breakdown.weeklyLimitPpm ?? breakdown.billingCyclePpm ?? breakdown.billedCents ?? null;
+            const unit = breakdown.billedCents && !breakdown.weeklyLimitPpm && !breakdown.billingCyclePpm ? "cents" : "percent";
+            const window = breakdown.weeklyLimitPpm ? "week" : breakdown.billingCyclePpm ? "cycle" : breakdown.billedCents ? "billed" : null;
+            const byBot = {};
+            for (const row of split?.byBot ?? []){
+                if (!row?.botId) continue;
+                const v = unit === "cents" ? Number(row.cents) || 0 : (Number(row.ppm) || 0) / 10000;
+                byBot[row.botId] = (byBot[row.botId] ?? 0) + v;
+            }
+            const percent = typeof status.usagePercent === "number" ? status.usagePercent : null;
+            return {
+                percent,
+                resetsAt: toMs(status.nextResetTimestampUtc),
+                periodStart: toMs(status.currentPeriodStart),
+                plan: status.grokPlanLabel || null,
+                cursorPlan: status.cursorPlanName || null,
+                hasUsage: status.hasAvailableUsage !== false,
+                unit,
+                window,
+                byBot
+            };
+        }
         async function transcriptEntryIdForNonce(session, agentId, clientNonce, signal) {
             try {
                 const data = await gatewayCall(session, "getAgentTranscriptTail", {
